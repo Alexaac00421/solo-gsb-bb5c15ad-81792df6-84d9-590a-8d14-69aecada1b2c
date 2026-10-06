@@ -592,6 +592,14 @@ curl -X POST http://localhost:8000/deliveries/batch -H 'Content-Type: applicatio
 - 批量与单笔接口共用同一份判定存储：单笔提交过的编号在批量中按原样重放，反之亦然；
   `GET /deliveries/{id}` 与 `/deliveries/report` 对批量写入的判定同样可用。
 
+> 单笔（`POST /deliveries`）与批量（`POST /deliveries/batch`）的受理在内部共用
+> `app/acceptance.py`：同一份**地址规范化**（去空白、小写、合法性）、**既有编号
+> 冲突检查**（同编号绑定其他规范化地址）、**受理时策略快照**（同批新判定共用一个
+> 策略修订号与比例，分别稳定分桶，规则集按版本缓存）与**路由持久化**（成功存终点、
+> 失败同样落库可重放，新判定写完后熔断只评估一次）。两条路径只是事务范围与响应
+> 形状不同——单笔成功返回判定体、失败返回 422；批量恒为 200 且逐项含 `status` ——
+> HTTP API、状态码、错误码与响应字段与历史版本完全一致。
+
 ### 10. 查询已持久化的判定
 
 ```bash
@@ -1244,11 +1252,12 @@ app/
   db.py        # SQLite 连接、建表、BEGIN IMMEDIATE 事务、只读快照事务
   routing.py   # 地址校验、规则集、逐跳解析、发布前全量校验
   traffic.py   # 默认投递的稳定分桶：规范化地址 → 0–99 桶 → 基线/候选
+  acceptance.py # 单笔 / 批量投递受理共享逻辑：地址规范化、既有编号冲突检查、受理时策略快照、分桶解析与路由持久化（失败同样落库）、熔断只评估一次
   preview.py   # 发布前预览：草稿 vs 基线版本的投递差异对比（纯内存，不落库）
   reporting.py # 核对报表：带时区时间窗（左闭右开）校验、页大小校验、翻页游标编解码
   models.py    # 请求模型与编辑期校验（无效地址/重复规则/空目标/按键合并操作组/投递回执/任务领取/撤销原因）
   store.py     # 草稿、修订快照、发布版本、默认投递策略、幂等投递判定、投递回执、投递任务租约（含按终点域名的在途领取上限）、终点任务撤销、核对报表与灰度熔断的持久化与查询
-  main.py      # FastAPI 路由（/draft、/draft/changes、/resolve、/preview、/policy、/policy/circuit-breaker、/deliver、/deliveries、/deliveries/batch、/deliveries/report、/deliveries/{id}/receipts、/deliveries/{id}/revocation、/deliveries/claims、/deliveries/claims/domain-limits 等）
+  main.py      # FastAPI 路由（/draft、/draft/changes、/resolve、/preview、/policy、/policy/circuit-breaker、/deliver、/deliveries、/deliveries/batch、/deliveries/report、/deliveries/{id}/receipts、/deliveries/{id}/revocation、/deliveries/claims、/deliveries/claims/domain-limits 等；单笔 / 批量受理共用 acceptance 模块）
 tests/         # pytest：API 全流程 + 解析单元测试 + 发布前预览 + 灰度策略 + 幂等投递判定 + 批量投递判定 + 投递回执 + 任务领取与租约 + 终点域名在途上限 + 终点任务撤销 + 按键合并与修订快照 + 核对报表 + 灰度自动熔断
 Dockerfile / docker-compose.yml
 ```
